@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # Universal Reasoner (UR) Project
 
 ## Vision
