@@ -1,0 +1,37 @@
+# Base configuration for the Universal Reasoner project
+# This file will be populated with default settings for various components.
+
+# Example Structure (to be refined):
+
+# project_name: "UniversalReasoner"
+# version: "0.0.1"
+
+# logging:
+#   level: "INFO" # DEBUG, INFO, WARNING, ERROR
+#   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# llm:
+#   # Configuration for the foundational LLM
+#   # model_path: "google/gemma-2b-it" # Default model, can be overridden by command line
+#   # config_args:
+#   #   device_map: "auto"
+#   #   torch_dtype: "float16" # float16, bfloat16, float32
+#   #   # For quantization with bitsandbytes (set quantization_config in HuggingFaceLLM if using these):
+#   #   # load_in_4bit: true 
+#   #   # bnb_4bit_compute_dtype: "bfloat16" # or float16
+#   #   # bnb_4bit_quant_type: "nf4" # or fp4
+#   #   # bnb_4bit_use_double_quant: true
+#   generation_params:
+#     max_new_tokens: 256
+#     temperature: 0.7
+#     top_k: 50
+#     top_p: 0.9
+
+# az_loop:
+#   num_steps: 100 # Default number of steps for the main loop if not specified by CLI
+#   # Configurations for Proposer, Solver, Verifier, RewardModel can go here
+#   # e.g., proposer_type: "SimpleArithmeticProposer"
+
+# data:
+#   arc_data_dir: "data/arc"
+#   self_generated_tasks_dir: "data/self_generated_tasks" 

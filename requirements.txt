@@ -1,0 +1,47 @@
+# Core ML Libraries (choose one framework, e.g., PyTorch)
+torch
+torchvision
+torchaudio
+
+# Or TensorFlow
+# tensorflow
+
+# Or JAX
+# jax
+# jaxlib
+
+# Foundational LLM (example, depends on chosen model)
+transformers # For AWQ models, consider using the latest version: pip install git+https://github.com/huggingface/transformers.git
+accelerate
+bitsandbytes # For BitsAndBytes quantization. May also be a dependency for some AWQ flows.
+# autoawq # May be needed for some AWQ model operations, though often not for basic loading with latest transformers.
+
+# Data Handling & Numerics
+numpy
+pandas
+
+# Utilities
+tqdm # Progress bars
+hydra-core # Configuration management (or Pydantic, or simple YAML parsing)
+PyYAML # For YAML parsing if not using Hydra directly for everything
+
+# Experiment Tracking (choose one or more)
+# wandb
+# mlflow
+
+# Graph Libraries (for Symbolic Engine, GNNs)
+# networkx # For basic graph operations
+# torch-geometric # If using PyTorch Geometric for GNNs
+# dgl # Alternative GNN library
+
+# ARC Specific (potentially, if not custom built)
+matplotlib # For visualization
+# pillow # For image manipulation if needed for visualization or simple features
+
+# Testing
+# pytest
+
+# Linter/Formatter (good practice, usually managed outside requirements.txt but listed for completeness)
+# ruff
+# black
+# mypy 
