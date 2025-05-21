@@ -1,6 +1,15 @@
+<<<<<<< HEAD
 if the sub topic is too much try solving it in many many parts. No need to ask shall I continue, you can always continue on your own. Remember the objective of our project and use plan.md for the reference.
 
 no need to implement features in one go, split them into pieces and continue! good luck. remember to make it SOTA and best of the best!
 
 dont create simplified files! and use gemma 3n which I have locally installed.
 
+=======
+if the sub topic is too much try solving it in many many parts. No need to ask shall I continue, you can always continue on your own. Remember the objective of our project and use plan.md for the reference.
+
+no need to implement features in one go, split them into pieces and continue! good luck. remember to make it SOTA and best of the best!
+
+dont create simplified files! and use gemma 3n which I have locally installed.
+
+>>>>>>> 5269bece5b85bcf2a281586823bbe54133ee08b3

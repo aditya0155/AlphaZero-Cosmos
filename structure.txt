@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 AlphaZero_Cosmos/
 |-- UR_docs/
 |   |-- plan.md
@@ -43,4 +44,51 @@ AlphaZero_Cosmos/
 |   |-- pipeline/
 |   |-- data_processing/
 |-- requirements.txt # Python dependencies
+=======
+AlphaZero_Cosmos/
+|-- UR_docs/
+|   |-- plan.md
+|   |-- (other future design documents...)
+|-- src/
+|   |-- ur_project/  # Main Python package for the Universal Reasoner
+|   |   |-- __init__.py
+|   |   |-- core/  # Core modules of UR (Proposer, Solver, Verifier, etc.)
+|   |   |   |-- __init__.py
+|   |   |   |-- foundational_llm.py # Interface/Placeholder for the base LLM
+|   |   |   |-- proposer.py
+|   |   |   |-- solver.py
+|   |   |   |-- verifier.py
+|   |   |   |-- reward_model.py
+|   |   |-- pipeline/ # Absolute Zero loop orchestration and overall pipeline
+|   |   |   |-- __init__.py
+|   |   |   |-- az_loop.py
+|   |   |-- data_processing/ # For ARC data handling, other datasets
+|   |   |   |-- __init__.py
+|   |   |   |-- arc_types.py # Dataclasses for ARC tasks, grids
+|   |   |   |-- arc_loader.py
+|   |   |-- utils/ # Common utilities, config, visualization
+|   |   |   |-- __init__.py
+|   |   |   |-- config.py
+|   |   |   |-- visualization.py
+|   |   |   |-- common_types.py # General type definitions
+|   |   |-- main.py # Main entry point for running the UR
+|   |   |-- configs/ # Configuration files (e.g., YAML)
+|   |       |-- base_config.yaml
+|-- data/ # Directory for datasets (ARC, self-generated tasks, etc.)
+|   |-- arc/
+|   |   |-- training/
+|   |   |-- evaluation/
+|   |   |-- solutions/ # (If we store solutions)
+|   |-- self_generated_tasks/
+|-- notebooks/ # Jupyter notebooks for experiments, analysis, visualization
+|   |-- 00_setup_and_config_check.ipynb
+|   |-- 01_arc_data_exploration.ipynb
+|-- scripts/ # Helper scripts (e.g., data download, batch processing)
+|   |-- download_arc.py
+|-- tests/ # Unit and integration tests
+|   |-- core/
+|   |-- pipeline/
+|   |-- data_processing/
+|-- requirements.txt # Python dependencies
+>>>>>>> 5269bece5b85bcf2a281586823bbe54133ee08b3
 |-- README.md        # Project overview
