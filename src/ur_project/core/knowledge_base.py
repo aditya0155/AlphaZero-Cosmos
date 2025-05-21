@@ -297,6 +297,55 @@ class ARCKnowledgeBase:
         if newly_inferred_relationships:
             print(f"Inferred {len(newly_inferred_relationships)} new '{relation_name}' relationships.")
 
+    def get_all_object_properties_for_prompt(self) -> List[str]:
+        """
+        Formats properties of all 'arc_object' entities for inclusion in a prompt.
+        """
+        object_property_strings = []
+        for entity_id, entity in self.entities.items():
+            if entity.entity_type == "arc_object":
+                props_summary = []
+                for prop in entity.properties:
+                    # Format value more nicely for prompt
+                    val_str = str(prop.value.value)
+                    if prop.value.value_type == "color":
+                        # Assuming ARCPixel has a simple representation
+                        val_str = f"Color({prop.value.value.value})" if hasattr(prop.value.value, 'value') else str(prop.value.value)
+                    
+                    if "bbox_" in prop.name and ("min_row" in prop.name or "min_col" in prop.name): 
+                        # Consolidate bbox info later if desired, for now list important ones
+                        props_summary.append(f"{prop.name}: {val_str}")
+                    elif "bbox_height" == prop.name or "bbox_width" == prop.name:
+                        props_summary.append(f"{prop.name}: {val_str}")
+                    elif prop.name in ["color", "pixel_count", "centroid_row", "centroid_col"]:
+                         props_summary.append(f"{prop.name}: {val_str}")
+                
+                # Construct a summary like: "Object 'obj_1' (color: C, pixel_count: N, bbox_height: H, bbox_width: W)"
+                # More sophisticated summary could be done here.
+                details = ", ".join(props_summary)
+                object_property_strings.append(f"Object '{entity.id}': {details}")
+        return object_property_strings
+
+    def get_all_relationships_for_prompt(self) -> List[str]:
+        """
+        Formats all relationships for inclusion in a prompt.
+        """
+        relationship_strings = []
+        for rel in self.relationships:
+            subject_id = rel.subject.id
+            object_id = rel.object.id if rel.object else "None"
+            attrs_summary = []
+            if rel.attributes:
+                for attr_name, attr_sym_val in rel.attributes.items():
+                    attrs_summary.append(f"{attr_name}: {attr_sym_val.value}")
+            
+            attr_str = ""
+            if attrs_summary:
+                attr_str = f" ({', '.join(attrs_summary)})"
+            
+            relationship_strings.append(f"Relationship: {subject_id} {rel.name} {object_id}{attr_str}")
+        return relationship_strings
+
 
 if __name__ == '__main__':
     kb = ARCKnowledgeBase()
