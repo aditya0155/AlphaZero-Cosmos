@@ -110,13 +110,21 @@ This document tracks the completion status of tasks outlined in `plan.md`.
         *   Experiment with few-shot prompting using successful examples from the AZ loop or public ARC training set. - DONE (Few-shot examples in `ARCSolver` updated with `MoveOp` and `DeleteObjectOp` examples. DSL usage instructions and retry prompt enhanced.)
     *   **2.3.2. Hypothesis Generation:** - DONE (ARCSolver prompt updated to request hypotheses. Parsing logic added. Solution object updated to store hypotheses.)
 *   **2.4. Program Synthesis & Reflection Engine (Version 1 - Basic)** - DONE
-    *   **2.4.1. Domain Specific Language (DSL) for ARC (Version 1):** - DONE (Initial DSL classes for operations, selectors, positions, and programs defined in `arc_dsl.py`.)
+    *   **2.4.1. Domain Specific Language (DSL) for ARC (Version 1):** - DONE
         *   **Objective:** Define a very simple DSL for grid transformations (e.g., `MOVE(object, direction)`, `CHANGE_COLOR(object, new_color)`, `COPY_SHAPE(source_pos, target_pos)`). - DONE
-        *   **Implementation:** Design the syntax and semantics of these basic operations. - DONE (Dataclasses define syntax; semantics to be enforced by executor)
+        *   **Implementation:** Design the syntax and semantics of these basic operations. - DONE (Dataclasses define syntax; semantics to be enforced by executor. The main abstract base class `DSLOperation` was renamed to `BaseOperation`, and all subclasses and type hints were updated accordingly. The `ABC` import in `arc_dsl.py` was moved to the top of the file.)
+        *   **Serialization:** `to_dict()` methods were added to all DSL classes (`BaseOperation` and its subclasses, `DSLObjectSelector`, `DSLPosition`, `DSLColor`, `DSLProgram`, and new conditional classes). These methods serialize the DSL objects to Python dictionaries, handling `ARCPixel` conversion to integers and recursive serialization of nested DSL objects.
+        *   **Conditional Logic (Placeholder):** Initial placeholder classes for conditional logic have been added to `arc_dsl.py`. These include `Condition` (ABC), `PixelMatchesCondition` (checks if a pixel at a given position has a specific color), `ObjectExistsCondition` (checks if an object matching certain criteria exists), `ConditionalBranch` (stores a condition and a program to execute if true), and `IfElseOp(BaseOperation)` (an operation that can execute different programs based on a condition). These new classes also include `to_dict()` methods.
     *   **2.4.2. LLM-to-DSL Translation (Initial Attempt):** - DONE (ARCSolver prompt updated for DSL generation. Solution object updated to store raw DSL string, prompt sent to LLM. max_new_tokens increased. Enhanced with retry mechanism, improved parsing, and more detailed DSL syntax guidance in prompt.)
         *   **Objective:** Train/prompt the foundational LLM to translate its high-level solution hypotheses (from 2.3.2) into sequences of DSL commands.
     *   **2.4.3. DSL Executor/Interpreter:** - DONE (Initial `ARCDSLInterpreter` created. Implemented `FillRectangleOp`, `ChangeColorOp`. Newly implemented and tested operations: `MoveOp`, `CopyObjectOp`, `DeleteObjectOp`, `CreateObjectOp`. Unit tests for object operations added.)
     *   **2.4.4. Verifiable Execution (Feedback to Solver):** - DONE (ARCSolver now parses raw_dsl_program into DSLProgram, executes it using ARCDSLInterpreter, and updates Solution.parsed_answer with the executed grid if successful. Metadata on DSL execution status is recorded.) (Enhanced with more detailed Solution object and verifier linkage confirmed)
+    *   **2.4.5. DSL Unit Tests:** - DONE
+        *   A new test file `src/ur_project/core/test_arc_dsl.py` was created.
+        *   This file includes comprehensive unit tests for:
+            *   The renaming of `DSLOperation` to `BaseOperation`.
+            *   The correctness of the `to_dict()` serialization methods for all DSL classes (including operations, selectors, positions, colors, programs, and conditional components).
+            *   The structure and `to_dict()` methods of the new conditional DSL components (`Condition`, `PixelMatchesCondition`, `ObjectExistsCondition`, `ConditionalBranch`, `IfElseOp`).
 *   **2.5. Enhanced Absolute Zero Loop** - PARTIALLY DONE
     *   **2.5.1. ARC-focused Task Proposer (via Emergent Reasoning Core):** - DONE
         *   **Objective:** Use the LLM (Emergent Reasoning Core V1) to propose variations or simplifications of existing ARC tasks, or generate new tasks based on learned patterns. - DONE
