@@ -295,7 +295,207 @@ class ARCKnowledgeBase:
                 self.relationships.append(new_rel)
         
         if newly_inferred_relationships:
-            print(f"Inferred {len(newly_inferred_relationships)} new '{relation_name}' relationships.")
+            # Consider using logging instead of print for library code
+            # print(f"Inferred {len(newly_inferred_relationships)} new '{relation_name}' relationships.")
+            pass
+
+
+    def infer_object_correspondence_from_training_pairs(self):
+        """
+        Finds and records likely correspondences between objects in input and output grids
+        of training pairs based on entity ID naming conventions and properties.
+        Assumes entity IDs like "train_X_input_obj_Y" and "train_X_output_obj_Z".
+        """
+        inferred_correspondences = 0
+        
+        # Group entities by training pair and type (input/output)
+        # Example ID: "train_0_input_obj_1", "train_0_output_obj_1"
+        # Need to parse out "train_0" as pair_id, "input" or "output" as context
+        
+        potential_pairs: Dict[str, Dict[str, List[SymbolicEntity]]] = {} # {pair_id: {"input": [], "output": []}}
+
+        for entity_id, entity in self.entities.items():
+            if entity.entity_type != "arc_object":
+                continue
+
+            parts = entity_id.split('_')
+            if len(parts) < 4: # e.g., train_0_input_obj_1 needs at least 4 parts
+                continue
+            
+            pair_id_prefix = parts[0] + "_" + parts[1] # e.g. "train_0"
+            context_type = parts[2] # "input" or "output"
+            
+            if context_type not in ["input", "output"]:
+                continue
+
+            if pair_id_prefix not in potential_pairs:
+                potential_pairs[pair_id_prefix] = {"input": [], "output": []}
+            potential_pairs[pair_id_prefix][context_type].append(entity)
+
+        for pair_id, contexts in potential_pairs.items():
+            input_objects = contexts.get("input", [])
+            output_objects = contexts.get("output", [])
+
+            if not input_objects or not output_objects:
+                continue
+
+            for input_obj_entity in input_objects:
+                # Extract properties for matching
+                input_color_prop = next((p for p in input_obj_entity.properties if p.name == "color"), None)
+                input_px_count_prop = next((p for p in input_obj_entity.properties if p.name == "pixel_count"), None)
+
+                if not input_color_prop or not input_px_count_prop:
+                    continue # Cannot match without these basic properties
+
+                candidate_output_objects = []
+                for output_obj_entity in output_objects:
+                    output_color_prop = next((p for p in output_obj_entity.properties if p.name == "color"), None)
+                    output_px_count_prop = next((p for p in output_obj_entity.properties if p.name == "pixel_count"), None)
+
+                    if not output_color_prop or not output_px_count_prop:
+                        continue
+                    
+                    # Criteria: Same color and same pixel_count
+                    if input_color_prop.value == output_color_prop.value and \
+                       input_px_count_prop.value == output_px_count_prop.value:
+                        candidate_output_objects.append(output_obj_entity)
+                
+                if len(candidate_output_objects) == 1: # Unique match based on criteria
+                    output_obj_entity = candidate_output_objects[0]
+                    # Add correspondence relationship
+                    attrs = {"confidence": (1.0, "float"), "pair_id": (pair_id, "string")}
+                    rel = self.add_relationship(
+                        subject_entity_id=input_obj_entity.id,
+                        object_entity_id=output_obj_entity.id,
+                        rel_type="correspondence_logic",
+                        rel_name="has_training_pair_correspondence",
+                        attributes=attrs
+                    )
+                    if rel: # add_relationship returns the rel if added, None if entities not found (should not happen here)
+                        inferred_correspondences +=1
+        
+        if inferred_correspondences > 0:
+            # print(f"Inferred {inferred_correspondences} object correspondences from training pairs.")
+            pass
+
+
+    def infer_property_transfer_via_correspondence(self):
+        """
+        After correspondences are established, identifies how properties change
+        between corresponding input and output objects.
+        """
+        inferred_property_changes = 0
+        correspondence_rels = self.query_relationships(rel_name="has_training_pair_correspondence")
+
+        for corr_rel in correspondence_rels:
+            input_obj_entity = corr_rel.subject
+            output_obj_entity = corr_rel.object
+            
+            if not input_obj_entity or not output_obj_entity: # Should not happen if query_relationships works
+                continue
+
+            # Create dictionaries of properties for easier lookup
+            input_props_map: Dict[str, SymbolicProperty] = {p.name: p for p in input_obj_entity.properties}
+            output_props_map: Dict[str, SymbolicProperty] = {p.name: p for p in output_obj_entity.properties}
+
+            for prop_name, input_prop in input_props_map.items():
+                output_prop = output_props_map.get(prop_name)
+                if output_prop: # Property exists in both
+                    if input_prop.value != output_prop.value:
+                        # Property changed
+                        attrs = {
+                            "property_name": (prop_name, "string"),
+                            "input_value": (input_prop.value.value, input_prop.value.value_type),
+                            "output_value": (output_prop.value.value, output_prop.value.value_type),
+                            "pair_id": corr_rel.attributes.get("pair_id", SymbolicValue("string","unknown_pair")).value # Propagate pair_id
+                        }
+                        # Ensure pair_id attribute value is passed directly
+                        if "pair_id" in corr_rel.attributes:
+                             attrs["pair_id"] = (corr_rel.attributes["pair_id"].value, corr_rel.attributes["pair_id"].value_type)
+
+
+                        rel = self.add_relationship(
+                            subject_entity_id=input_obj_entity.id,
+                            object_entity_id=output_obj_entity.id,
+                            rel_type="transformation_observation",
+                            rel_name="property_changed",
+                            attributes=attrs
+                        )
+                        if rel:
+                            inferred_property_changes += 1
+                # else:
+                    # Property lost (input_prop exists, output_prop does not)
+                    # Future: add "property_lost" relationship
+                    # pass
+
+            # Future: Iterate output_props_map to find "property_gained"
+            # for prop_name, output_prop in output_props_map.items():
+            #     if prop_name not in input_props_map:
+            #         # Property gained
+            #         pass
+        
+        if inferred_property_changes > 0:
+            # print(f"Inferred {inferred_property_changes} property changes via correspondence.")
+            pass
+
+    def propagate_properties_via_symmetry(self, symmetry_relation_name: str = "is_symmetric_to"):
+        """
+        Infers properties for an object based on the properties of its symmetric counterpart.
+        Assumes "is_symmetric_to" relationships exist in the KB.
+        Properties are propagated if one entity has it and the other lacks it.
+        """
+        propagatable_properties = ["color", "pixel_count", "bbox_height", "bbox_width"] # Extendable list
+        # Potentially "shape_type", "is_hollow" if these get added as standard properties.
+        
+        symmetry_relationships = self.query_relationships(rel_name=symmetry_relation_name)
+        properties_propagated_count = 0
+
+        for rel in symmetry_relationships:
+            entity_A = rel.subject
+            entity_B = rel.object
+
+            if not entity_A or not entity_B: # Should not happen with valid relationships
+                continue
+
+            # Helper to get a map of existing properties for an entity
+            def get_props_map(entity: SymbolicEntity) -> Dict[str, SymbolicProperty]:
+                return {p.name: p for p in entity.properties}
+
+            props_A = get_props_map(entity_A)
+            props_B = get_props_map(entity_B)
+
+            for prop_name in propagatable_properties:
+                prop_A_exists = prop_name in props_A
+                prop_B_exists = prop_name in props_B
+
+                # Propagate A to B
+                if prop_A_exists and not prop_B_exists:
+                    source_prop = props_A[prop_name]
+                    # SymbolicEntity.add_property handles creating new SymbolicValue and SymbolicProperty
+                    entity_B.add_property(name=source_prop.name, 
+                                          value=source_prop.value.value, 
+                                          value_type=source_prop.value.value_type)
+                    properties_propagated_count += 1
+                    props_B = get_props_map(entity_B) # Update props_B map after adding
+
+                # Propagate B to A
+                elif prop_B_exists and not prop_A_exists:
+                    source_prop = props_B[prop_name]
+                    entity_A.add_property(name=source_prop.name, 
+                                          value=source_prop.value.value, 
+                                          value_type=source_prop.value.value_type)
+                    properties_propagated_count += 1
+                    props_A = get_props_map(entity_A) # Update props_A map
+                
+                # Conflict logging (simplified as per Phase 2 instructions to only add if missing)
+                # elif prop_A_exists and prop_B_exists:
+                #     if props_A[prop_name].value != props_B[prop_name].value:
+                #         # print(f"Warning: Symmetric entities {entity_A.id} and {entity_B.id} have conflicting values for property '{prop_name}'.")
+                #         pass # Using pass as per simplified instructions
+
+        if properties_propagated_count > 0:
+            # print(f"Propagated {properties_propagated_count} properties via symmetry.")
+            pass
 
     def get_all_object_properties_for_prompt(self) -> List[str]:
         """

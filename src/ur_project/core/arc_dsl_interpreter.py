@@ -272,22 +272,191 @@ class ARCDSLInterpreter:
             
         return grid
 
+    def _find_objects_by_criteria(self, grid: ARCGrid, criteria: Dict[str, Any]) -> List[List[Tuple[int, int, int]]]:
+        """
+        Finds objects in the grid based on criteria.
+        Currently supports {'color': some_color_value}.
+        Returns a list of objects, where each object is a list of (r, c, original_color) tuples.
+        """
+        try:
+            rows, cols = self._get_grid_dimensions(grid)
+        except DSLExecutionError:
+            return []
+        if rows == 0 or cols == 0:
+            return []
+
+        target_color = criteria.get('color')
+        if target_color is None:
+            # Or raise error, depending on how strict selector criteria must be
+            # print("Warning: No color specified in criteria for object selection.")
+            return []
+        
+        # If target_color was parsed into DSLColor, extract its value
+        if isinstance(target_color, DSLColor):
+            target_color = target_color.value
+
+        objects = []
+        visited = [[False for _ in range(cols)] for _ in range(rows)]
+
+        for r_idx in range(rows):
+            for c_idx in range(cols):
+                if grid[r_idx][c_idx] == target_color and not visited[r_idx][c_idx]:
+                    current_object_pixels = []
+                    q = [(r_idx, c_idx)]
+                    visited[r_idx][c_idx] = True
+                    
+                    head = 0
+                    while head < len(q):
+                        curr_r, curr_c = q[head]
+                        head += 1
+                        
+                        # Store original color along with coordinates
+                        current_object_pixels.append((curr_r, curr_c, grid[curr_r][curr_c]))
+
+                        # Explore neighbors (4-connectivity)
+                        for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                            nr, nc = curr_r + dr, curr_c + dc
+                            if 0 <= nr < rows and 0 <= nc < cols and \
+                               grid[nr][nc] == target_color and not visited[nr][nc]:
+                                visited[nr][nc] = True
+                                q.append((nr, nc))
+                    
+                    if current_object_pixels:
+                        objects.append(current_object_pixels)
+        return objects
+
     def _execute_move_op(self, op: MoveOp, grid: ARCGrid) -> ARCGrid:
-        # Placeholder - actual implementation needed
-        raise DSLExecutionError(f"MoveOp with selector '{op.selector.criteria}' to position '({op.destination.row},{op.destination.col})' not yet implemented.")
-        # return grid
+        try:
+            rows, cols = self._get_grid_dimensions(grid)
+        except DSLExecutionError:
+            return grid
+        if rows == 0 or cols == 0:
+            return grid
+
+        if not isinstance(op.selector, DSLObjectSelector) or not isinstance(op.selector.criteria, dict):
+            raise DSLExecutionError("MoveOp selector criteria is invalid.")
+        
+        selected_objects = self._find_objects_by_criteria(grid, op.selector.criteria)
+        if not selected_objects:
+            return grid # No objects matched, return grid as is
+
+        # For simplicity, assume background color is 0. This could be made more robust.
+        background_color = 0 
+        
+        # The DSLPosition for MoveOp and CopyObjectOp is assumed to be an offset.
+        # If op.destination had an 'is_relative' flag, that would be more explicit.
+        # For now, op.destination.row and op.destination.col are treated as relative offsets.
+        offset_r, offset_c = op.destination.row, op.destination.col
+
+        for obj_pixels in selected_objects:
+            if not obj_pixels: continue
+
+            # Determine object's current top-left to apply relative move correctly
+            min_r = min(p[0] for p in obj_pixels)
+            min_c = min(p[1] for p in obj_pixels)
+
+            # Store pixel data and clear original positions
+            pixels_to_move = []
+            for r, c, color_val in obj_pixels:
+                pixels_to_move.append({'r_offset': r - min_r, 'c_offset': c - min_c, 'color': color_val})
+                grid[r][c] = background_color # Clear original pixel
+
+            # Draw at new location
+            for pixel_data in pixels_to_move:
+                # New top-left of the object
+                new_obj_top_left_r, new_obj_top_left_c = min_r + offset_r, min_c + offset_c
+                
+                # Final pixel coordinates
+                dest_r, dest_c = new_obj_top_left_r + pixel_data['r_offset'], \
+                                 new_obj_top_left_c + pixel_data['c_offset']
+
+                if 0 <= dest_r < rows and 0 <= dest_c < cols: # Clipping
+                    grid[dest_r][dest_c] = pixel_data['color']
+        return grid
 
     def _execute_copy_object_op(self, op: CopyObjectOp, grid: ARCGrid) -> ARCGrid:
-        raise DSLExecutionError(f"CopyObjectOp with selector '{op.selector.criteria}' to position '({op.destination.row},{op.destination.col})' not yet implemented.")
-        # return grid
+        try:
+            rows, cols = self._get_grid_dimensions(grid)
+        except DSLExecutionError:
+            return grid
+        if rows == 0 or cols == 0:
+            return grid
+
+        if not isinstance(op.selector, DSLObjectSelector) or not isinstance(op.selector.criteria, dict):
+            raise DSLExecutionError("CopyObjectOp selector criteria is invalid.")
+
+        selected_objects = self._find_objects_by_criteria(grid, op.selector.criteria)
+        if not selected_objects:
+            return grid
+
+        offset_r, offset_c = op.destination.row, op.destination.col # Relative offset
+
+        for obj_pixels in selected_objects:
+            if not obj_pixels: continue
+            
+            min_r = min(p[0] for p in obj_pixels)
+            min_c = min(p[1] for p in obj_pixels)
+
+            pixels_to_copy = []
+            for r, c, color_val in obj_pixels:
+                 pixels_to_copy.append({'r_offset': r - min_r, 'c_offset': c - min_c, 'color': color_val})
+            
+            # Draw at new location (original pixels are NOT cleared)
+            for pixel_data in pixels_to_copy:
+                new_obj_top_left_r, new_obj_top_left_c = min_r + offset_r, min_c + offset_c
+                dest_r, dest_c = new_obj_top_left_r + pixel_data['r_offset'], \
+                                 new_obj_top_left_c + pixel_data['c_offset']
+
+                if 0 <= dest_r < rows and 0 <= dest_c < cols: # Clipping
+                    grid[dest_r][dest_c] = pixel_data['color']
+        return grid
 
     def _execute_create_object_op(self, op: CreateObjectOp, grid: ARCGrid) -> ARCGrid:
-        raise DSLExecutionError(f"CreateObjectOp at position '({op.destination.row},{op.destination.col})' not yet implemented.")
-        # return grid
+        # This operation's definition in arc_dsl.py is: CreateObjectOp(pixels: List[Tuple[int, int, int]], destination: DSLPosition)
+        # pixels is List[(row_offset, col_offset, color_value)]
+        # destination is the top-left absolute coordinate for the new object.
+        try:
+            rows, cols = self._get_grid_dimensions(grid)
+        except DSLExecutionError:
+             # If grid is empty, it's hard to create an object. Could resize, or error.
+             # For now, let's assume create might work on a 0x0 grid if pixels list is empty.
+             if not op.pixels: return grid # Creating nothing on empty grid
+             else: raise DSLExecutionError("Cannot create object on malformed or initially zero-size grid if pixels are provided.")
+
+        if not op.pixels: # Nothing to create
+            return grid
+
+        dest_base_r, dest_base_c = op.destination.row, op.destination.col
+
+        for r_offset, c_offset, color_val in op.pixels:
+            final_r, final_c = dest_base_r + r_offset, dest_base_c + c_offset
+            if 0 <= final_r < rows and 0 <= final_c < cols: # Clipping
+                grid[final_r][final_c] = color_val
+            # else: pixel is out of bounds, ignore or error? For now, ignore.
+        return grid
 
     def _execute_delete_object_op(self, op: DeleteObjectOp, grid: ARCGrid) -> ARCGrid:
-        raise DSLExecutionError(f"DeleteObjectOp with selector '{op.selector.criteria}' not yet implemented.")
-        # return grid
+        try:
+            rows, cols = self._get_grid_dimensions(grid)
+        except DSLExecutionError:
+            return grid
+        if rows == 0 or cols == 0:
+            return grid
+        
+        if not isinstance(op.selector, DSLObjectSelector) or not isinstance(op.selector.criteria, dict):
+            raise DSLExecutionError("DeleteObjectOp selector criteria is invalid.")
+
+        selected_objects = self._find_objects_by_criteria(grid, op.selector.criteria)
+        if not selected_objects:
+            return grid
+        
+        background_color = 0 # Assume background is 0
+
+        for obj_pixels in selected_objects:
+            for r, c, _ in obj_pixels: # color_val is not needed for deletion
+                 if 0 <= r < rows and 0 <= c < cols: # Should always be true from find_objects
+                    grid[r][c] = background_color
+        return grid
 
 if __name__ == '__main__':
     # Example Usage

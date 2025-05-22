@@ -82,9 +82,9 @@ class AZLoop:
             generated_task_id = f"arc_gen_iter_{step_number}"
             original_task_id_for_logging = generated_task_id # Use the ID passed to proposer
             try:
-                # ARCTaskProposer's propose_task returns ARCTask
-                original_arc_task: ARCTask = self.proposer.propose_task(task_id=generated_task_id) # Concept omitted for now
-                logging.info(f"Step {step_number} [Propose]: ARCTaskProposer proposed ARCTask ID {original_arc_task.task_id}.")
+                # ARCTaskProposer's propose_task returns ARCTask, task_name_str, task_desc_str
+                original_arc_task, task_name_str, task_desc_str = self.proposer.propose_task(task_id=generated_task_id) # Concept omitted for now
+                logging.info(f"Step {step_number} [Propose]: ARCTaskProposer proposed ARCTask ID {original_arc_task.task_id}, Name: '{task_name_str}'.")
 
                 if not original_arc_task.test_pairs:
                     logging.error(f"Step {step_number} [Propose]: ARCTask {original_arc_task.task_id} has no test pairs. Skipping.")
@@ -98,28 +98,24 @@ class AZLoop:
                 # These are not part of ARCTask structure but could be in a metadata dict if proposer returns it,
                 # or ARCTask could be augmented. For now, use generic description.
                 # The ARCTaskProposer's _parse_llm_response_to_arctask creates metadata including task_name & desc.
-                # Let's assume it's accessible if ARCTask had a .metadata field.
-                # For now, we'll construct a description.
-                task_desc_from_proposer = "Generated ARC Task" # Placeholder
-                # If ARCTaskProposer could return metadata (e.g. (task, metadata_dict)):
-                # task_desc_from_proposer = original_arc_task.metadata.get("task_description", "Generated ARC Task")
+                # task_name_str and task_desc_str are now directly available.
 
                 task_to_process = ARCPuzzle(
                     id=f"{original_arc_task.task_id}_test_0",
-                    description=task_desc_from_proposer, # Use parsed description if available
+                    description=f"{task_name_str}: {task_desc_str}", 
                     data=first_test_pair.input_grid,
                     expected_output_grid=first_test_pair.output_grid,
                     source_task_id=original_arc_task.task_id,
-                    source_pair_id=first_test_pair.pair_id or "test_0", # Use pair_id if ARCTaskProposer sets it
-                    # text_description from original_arc_task.metadata.get("task_description") if available
+                    source_pair_id=first_test_pair.pair_id or "test_0", 
+                    text_description=task_desc_str,
                     metadata={
                         "original_training_pairs_count": len(original_arc_task.training_pairs),
-                        "original_task_name": "Parsed Task Name", # Placeholder, get from metadata if possible
-                        "original_task_description": task_desc_from_proposer,
+                        "original_task_name": task_name_str, 
+                        "original_task_description": task_desc_str,
                         "full_arc_task_id": original_arc_task.task_id
                     }
                 )
-                logging.info(f"Step {step_number} [Propose]: Converted ARCTask {original_arc_task.task_id} to ARCPuzzle {task_to_process.id} for solving.")
+                logging.info(f"Step {step_number} [Propose]: Converted ARCTask {original_arc_task.task_id} to ARCPuzzle {task_to_process.id} ('{task_to_process.description}') for solving.")
 
             except Exception as e:
                 logging.error(f"Step {step_number} [Propose]: Error during ARCTaskProposer proposal or ARCPuzzle conversion: {e}", exc_info=True)
