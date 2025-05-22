@@ -70,7 +70,8 @@ class AZLoop:
             "reward_value": None,
             "reward_reason": None,
             "reward_metadata": {},
-            "timings": {}
+            "timings": {},
+            "rl_update_info": None # Added for RL fine-tuning step
         }
 
         # 1. Propose Task
@@ -244,7 +245,54 @@ class AZLoop:
         logging.info(f"Step {step_number} [Reward]: Task ID {task_to_process.id} - Reward: {reward_signal.reward_value}, Reason: '{reward_signal.reason}' (took {reward_time:.3f}s)")
         if step_data["reward_metadata"]: 
             logging.info(f"Step {step_number} [Reward]: Full Metadata: {step_data['reward_metadata']}")
+
+        # 5. RL Fine-tuning (Optional - if solver and LLM support it)
+        start_time = time.time()
+        rl_update_info_dict = None
+        if isinstance(self.solver, ARCSolver) and isinstance(self.solver.llm, BaseLLM):
+            prompt_text_for_rl = solution.prompt_for_llm
+            generated_dsl_for_rl = None
+
+            # Determine which DSL program led to the final successful answer
+            if solution.parsed_answer is not None: # A successful grid was produced
+                if solution.retry_attempted and solution.executed_grid_retry == solution.parsed_answer:
+                    generated_dsl_for_rl = solution.raw_dsl_program_retry
+                elif not solution.retry_attempted and solution.executed_grid == solution.parsed_answer:
+                    generated_dsl_for_rl = solution.raw_dsl_program
+                # If parsed_answer is set but doesn't match either executed_grid or executed_grid_retry
+                # (which shouldn't happen with current solver logic but good to be aware),
+                # then generated_dsl_for_rl might remain None or we might default to raw_dsl_program.
+                # Current logic: only use DSL if it directly led to parsed_answer.
+                if generated_dsl_for_rl is None and solution.raw_dsl_program: # Fallback for safety, though less direct
+                    logging.warning(f"Step {step_number} [RL Fine-tune]: Parsed answer exists but doesn't match executed_grid or executed_grid_retry. Falling back to initial raw_dsl_program for RL if available.")
+                    if not solution.retry_attempted: # only use initial if no retry was made or retry failed to produce parsed_answer
+                         generated_dsl_for_rl = solution.raw_dsl_program
+
+
+            if prompt_text_for_rl and generated_dsl_for_rl:
+                try:
+                    # Ensure the LLM instance from the solver is used
+                    rl_update_info_dict = self.solver.llm.get_action_log_probs_and_train_step(
+                        prompt_text=prompt_text_for_rl,
+                        generated_text=generated_dsl_for_rl,
+                        reward=float(reward_signal.reward_value) # Ensure reward is float
+                    )
+                    logging.info(f"Step {step_number} [RL Fine-tune]: Update info: {rl_update_info_dict}")
+                    step_data["rl_update_info"] = rl_update_info_dict
+                except Exception as e_rl:
+                    logging.error(f"Step {step_number} [RL Fine-tune]: Error during RL update step: {e_rl}", exc_info=True)
+                    step_data["rl_update_info"] = {"error": str(e_rl)}
+            else:
+                logging.info(f"Step {step_number} [RL Fine-tune]: Skipping RL update. Prompt or generated DSL not available. Prompt: {'OK' if prompt_text_for_rl else 'Missing'}, DSL: {'OK' if generated_dsl_for_rl else 'Missing'}")
+        else:
+            logging.info(f"Step {step_number} [RL Fine-tune]: Skipping RL update. Solver is not ARCSolver or its LLM is not BaseLLM.")
         
+        rl_finetune_time = time.time() - start_time
+        step_data["timings"]["rl_finetune"] = rl_finetune_time
+        if rl_update_info_dict: # Log time only if attempted
+             logging.info(f"Step {step_number} [RL Fine-tune]: RL fine-tuning attempt took {rl_finetune_time:.3f}s.")
+
+
         self.history.append(step_data)
         logging.info(f"--- AZ Loop Step {step_number} Finished ---")
         return step_data

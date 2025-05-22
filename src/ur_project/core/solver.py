@@ -2,12 +2,14 @@ from typing import Any, Dict, Protocol, Optional
 from ur_project.core.foundational_llm import BaseLLM, LLMResponse
 from ur_project.core.proposer import Task # Using the Task protocol
 from .arc_dsl import DSLProgram # Import DSLProgram for type hinting
+from ur_project.data_processing.arc_types import ARCGrid # For type hinting in Solution
 
 class Solution:
-    def __init__(self, task_id: str, solved_by: str, raw_answer: Any, parsed_answer: Any = None, metadata: Optional[Dict[str, Any]] = None):
+    def __init__(self, task_id: str, solved_by: str, raw_answer: Any, parsed_answer: Any = None, metadata: Optional[Dict[str, Any]] = None, prompt_for_llm: Optional[str] = None):
         self.task_id = task_id
         self.solved_by = solved_by
         self.raw_answer = raw_answer # Raw LLM response for the first attempt
+        self.prompt_for_llm: Optional[str] = prompt_for_llm # Stores the most recent prompt sent to LLM
         
         # Fields for the initial DSL attempt
         self.hypothesized_transformations: Optional[str] = None
@@ -175,9 +177,60 @@ class ARCSolver(BaseSolver):
                 "solution_input_grid": [[ARCPixel(3), ARCPixel(3)], [ARCPixel(0), ARCPixel(3)]], # Test input
                 "solution_output_grid": [[ARCPixel(5), ARCPixel(5)], [ARCPixel(0), ARCPixel(5)]], # Test output
                 "thoughts": "The task is to change the color of all non-background pixels. In the example, color 1 becomes 2. In the test input, color 3 should become 5.",
-                "dsl_program": "CHANGE_COLOR(source_color=3, target_color=5)"
+                "dsl_program": "CHANGE_COLOR(selector=DSLObjectSelector(criteria={'old_color':3}), new_color=DSLColor(5))" # Updated to use new ChangeColorOp syntax
             },
-            # Add 1-2 more diverse examples here
+            {
+                "task_name": "example_task_move_blue_object_down",
+                "task_description": "Moves the blue object (color 2) down by 2 cells.",
+                "input_grids": [
+                    [[ARCPixel(0), ARCPixel(2), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(2), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)]]
+                ],
+                "output_grids": [ # Not strictly needed for solver prompt if test I/O is provided, but good for completeness
+                    [[ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(2), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(2), ARCPixel(0)]]
+                ],
+                "solution_input_grid": # This is the actual test input grid for this example
+                    [[ARCPixel(2), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(2), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)]],
+                "solution_output_grid": # This is the expected output for the test input
+                    [[ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(2), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(2), ARCPixel(0), ARCPixel(0)]],
+                "thoughts": "The blue object, identified by color 2, needs to be moved down. The movement is relative, by 2 rows and 0 columns.",
+                "dsl_program": "MOVE_OP(selector=DSLObjectSelector(criteria={'color':2}), destination=DSLPosition(row=2, col=0))"
+            },
+            {
+                "task_name": "example_task_delete_red_objects",
+                "task_description": "Deletes all red objects (color 4).",
+                "input_grids": [
+                    [[ARCPixel(4), ARCPixel(0), ARCPixel(1)],
+                     [ARCPixel(0), ARCPixel(4), ARCPixel(4)],
+                     [ARCPixel(1), ARCPixel(0), ARCPixel(0)]]
+                ],
+                "output_grids": [
+                     [[ARCPixel(0), ARCPixel(0), ARCPixel(1)],
+                      [ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                      [ARCPixel(1), ARCPixel(0), ARCPixel(0)]]
+                ],
+                "solution_input_grid":
+                    [[ARCPixel(0), ARCPixel(4), ARCPixel(4)],
+                     [ARCPixel(4), ARCPixel(1), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(4), ARCPixel(0)]],
+                "solution_output_grid":
+                    [[ARCPixel(0), ARCPixel(0), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(1), ARCPixel(0)],
+                     [ARCPixel(0), ARCPixel(0), ARCPixel(0)]],
+                "thoughts": "All objects of color 4 need to be removed from the grid. This means their pixels become background color (0).",
+                "dsl_program": "DELETE_OBJECT_OP(selector=DSLObjectSelector(criteria={'color':4}))"
+            }
         ]
 
     def solve_task(self, task: ARCPuzzle) -> Solution:
@@ -284,8 +337,19 @@ class ARCSolver(BaseSolver):
         current_task_prompt_parts.append(self._format_grid_for_prompt(task.expected_output_grid, "test_output_grid"))
 
         current_task_prompt_parts.append("\nBased on the examples, the knowledge base insights, and the task grids, provide your reasoning and the DSL program to solve this task.\n")
+        
+        # Refined DSL Usage Instructions
+        current_task_prompt_parts.append(
+            "DSL Syntax Guide:\n"
+            "- Available commands: CHANGE_COLOR, FILL_RECTANGLE, MOVE_OP, COPY_OBJECT_OP, DELETE_OBJECT_OP.\n"
+            "- Object Selection: Use `selector=DSLObjectSelector(criteria={'color':COLOR_VALUE})` to select objects based on their color. (Note: CHANGE_COLOR uses `old_color` in its criteria for now, e.g., `selector=DSLObjectSelector(criteria={'old_color':X})`).\n"
+            "- Movement/Copy Destination: For `MOVE_OP` and `COPY_OBJECT_OP`, the `destination` parameter must be a `DSLPosition` representing a *relative offset* from the object's current top-left corner (e.g., `DSLPosition(row=Y_OFFSET, col=X_OFFSET)`).\n"
+            "- Colors: Use `DSLColor(VALUE)` for color parameters, e.g. `new_color=DSLColor(5)`.\n"
+            "- Positions: Use `DSLPosition(row=Y, col=X)` for position parameters.\n"
+        )
+        
         current_task_prompt_parts.append("THOUGHTS:\n(Provide a step-by-step thought process for how to arrive at the solution. Analyze the input and output grids, identify patterns, and explain the transformations needed. Refer to KB insights if they are helpful.)\n")
-        current_task_prompt_parts.append("DSL_PROGRAM:\n(Provide the DSL program that transforms the input grid to the output grid. Use one DSL command per line. Refer to the DSL documentation for available commands and syntax.)\n")
+        current_task_prompt_parts.append("DSL_PROGRAM:\n(Provide the DSL program that transforms the input grid to the output grid. Use one DSL command per line. Ensure parameters match the command's requirements, e.g., `CHANGE_COLOR(selector=DSLObjectSelector(criteria={'old_color':X}), new_color=DSLColor(Y))`, `MOVE_OP(selector=DSLObjectSelector(criteria={'color':X}), destination=DSLPosition(Y_OFFSET,X_OFFSET))`).\n")
         
         main_task_section = "".join(current_task_prompt_parts)
 
@@ -295,6 +359,11 @@ class ARCSolver(BaseSolver):
         # --- 6. Call LLM ---
         # print(f"DEBUG: Final Prompt for LLM:\n{final_prompt}") # For debugging
         
+        # Store the initial prompt before the first LLM call
+        # The Solution object needs to be created first or prompt stored temporarily.
+        # Let's create Solution object earlier or pass prompt to it.
+        # For now, will assign after Solution object is created.
+
         llm_response: LLMResponse = self.llm.generate(
             final_prompt,
             # Adjust max_new_tokens based on expected DSL length and thoughts
@@ -331,7 +400,8 @@ class ARCSolver(BaseSolver):
             task_id=task.id,
             solved_by=self.solver_id,
             raw_answer=raw_answer_text, # Initial LLM response
-            metadata=llm_response.metadata
+            metadata=llm_response.metadata,
+            prompt_for_llm=final_prompt # Store the initial prompt
         )
         solution.hypothesized_transformations = thoughts_content
         solution.raw_dsl_program = dsl_content
@@ -380,11 +450,17 @@ class ARCSolver(BaseSolver):
             retry_prompt_parts.append(f"\n\nError Encountered:\n{error_message_for_prompt}\n")
             retry_prompt_parts.append(kb_insights_str) # Add KB insights again
             retry_prompt_parts.append("\nPlease analyze the error and provide a corrected DSL_PROGRAM.\n")
+            # Enhanced Retry Prompt Syntax Reminder
+            retry_prompt_parts.append(
+                "Reminder: Ensure correct DSL syntax (e.g., `COMMAND_NAME(param1=Value1, selector=DSLObjectSelector(criteria={'color':X}), destination=DSLPosition(relative_row,relative_col))`). "
+                "Pay attention to parameter names (e.g., `new_color` for CHANGE_COLOR, `destination` for MOVE_OP) and value types (e.g. `DSLColor(val)` for colors, `DSLPosition(r,c)` for positions/offsets, simple integers for criteria colors like `{'color':X}`).\n"
+            )
             retry_prompt_parts.append("Your new THOUGHTS should explain the correction.\n")
             retry_prompt_parts.append("THOUGHTS:\n")
             retry_prompt_parts.append("DSL_PROGRAM:\n")
 
             solution.retry_prompt = "".join(retry_prompt_parts)
+            solution.prompt_for_llm = solution.retry_prompt # Update prompt_for_llm with the retry prompt
 
             # Call LLM for retry
             llm_response_retry: LLMResponse = self.llm.generate(
@@ -422,9 +498,10 @@ class ARCSolver(BaseSolver):
                     current_grid_for_execution_retry
                 )
                 solution.parsed_answer = solution.executed_grid_retry # Success on retry
-                # Clear previous errors if retry was successful
-                solution.dsl_parse_error = None
-                solution.dsl_execution_error = None
+                # Clear previous errors if retry was successful and an executed grid is present
+                if solution.executed_grid_retry is not None:
+                    solution.dsl_parse_error = None
+                    solution.dsl_execution_error = None 
             except DSLParsingError as e_parse_retry:
                 solution.dsl_parse_error_retry = str(e_parse_retry)
             except DSLExecutionError as e_exec_retry:
