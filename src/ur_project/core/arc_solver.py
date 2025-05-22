@@ -7,8 +7,11 @@ from ur_project.core.solver import BaseSolver, Solution
 from ur_project.core.foundational_llm import BaseLLM, LLMResponse
 from ur_project.data_processing.arc_types import ARCPuzzle, ARCGrid, ARCPixel # ARCPuzzle is the Task
 from ur_project.utils.visualization import visualize_arc_grid # For potential debug
-from .perception import BaseFeatureExtractor, GridFeatures # Import perception components
-from .knowledge_base import ARCKnowledgeBase # Import Knowledge Base
+# Ensure UNetARCFeatureExtractor is imported if it's the specific type expected
+from .perception import BaseFeatureExtractor, GridFeatures, UNetARCFeatureExtractor 
+from .knowledge_base import ARCKnowledgeBase, SymbolicEntity, SymbolicRelationship, SymbolicValue, EntityPlaceholder # Import Knowledge Base & new types
+from .symbol_grounding import SymbolGroundingModel # Import Symbol Grounding Model
+from .symbolic_learner import SimpleRuleInducer # Import Rule Inducer
 from .arc_dsl import (
     DSLProgram, DSLOperation, ChangeColorOp, MoveOp, CopyObjectOp,
     CreateObjectOp, FillRectangleOp, DeleteObjectOp,
@@ -22,10 +25,18 @@ class ARCSolver(BaseSolver):
     It attempts to generate the output grid, possibly as a string representation.
     It now uses a feature extractor to provide more context to the LLM.
     It also initializes and can use an ARCKnowledgeBase.
+    It integrates symbol grounding and rule induction.
     """
-    def __init__(self, llm: BaseLLM, feature_extractor: BaseFeatureExtractor, solver_id: str = "ARCSolver_LLM_v0.3"):
+    def __init__(self, 
+                 llm: BaseLLM, 
+                 feature_extractor: UNetARCFeatureExtractor, # Expecting the enhanced version
+                 symbol_grounder: SymbolGroundingModel,
+                 rule_inducer: SimpleRuleInducer,
+                 solver_id: str = "ARCSolver_LLM_v0.4_Integrated"):
         self.llm = llm
         self.feature_extractor = feature_extractor
+        self.symbol_grounder = symbol_grounder
+        self.rule_inducer = rule_inducer
         self.kb = ARCKnowledgeBase() # Initialize a knowledge base instance
         self.solver_id = solver_id
 
@@ -256,53 +267,70 @@ class ARCSolver(BaseSolver):
 
         input_grid_str = self._grid_to_string_representation(task.data) # task.data is the input_grid
         
-        # Clear and populate KB for the current task context
-        self.kb.clear_task_context()
-        grid_features: Optional[GridFeatures] = self.feature_extractor.extract_features(task.data)
+        # 1. Define Contexts & Clear relevant KB parts
+        current_task_id = task.source_task_id
+        current_example_id = task.source_pair_id if task.source_pair_id else "test_0" # Default if not specified
         
-        symbolic_info_segment = "No symbolic information extracted or available."
-        if grid_features:
-            # Populate KB from grid_features
-            grid_entity_id = "input_grid_entity"
-            self.kb.add_grid_features_as_entity(grid_features, grid_id=grid_entity_id)
-            for arc_obj in grid_features.objects:
-                self.kb.add_arc_object_as_entity(arc_obj, grid_context="input")
-            
-            # TODO: Add relationship extraction and inference here
-            # self.kb.infer_spatial_relationships() # Example
+        base_context = [current_task_id, current_example_id]
+        input_context = base_context + ["input"]
+        output_context = base_context + ["output"]
+        # Clear everything specifically for this example to avoid state leakage between solve_task calls for different examples
+        self.kb.clear_contexts_by_tags(context_tags_to_clear=base_context, match_all=True)
 
-            # TODO: Query the KB and format symbolic information for the prompt
-            # This is a placeholder for what could be extracted from the KB
-            kb_derived_object_props = []
-            for obj_entity_id, sym_entity in self.kb.entities.items():
-                if sym_entity.entity_type == "arc_object":
-                    props_str_list = []
-                    for prop in sym_entity.properties:
-                        props_str_list.append(f"{prop.name}: {prop.value.value}")
-                    kb_derived_object_props.append(f"  Object {sym_entity.id}: { ' | '.join(props_str_list) }")
-            if kb_derived_object_props:
-                symbolic_info_segment = "Symbolic Object Properties (from KB):\n" + "\n".join(kb_derived_object_props)
-            else:
-                symbolic_info_segment = "Symbolic information (KB): No objects found or properties extracted into KB."
-
-        features_str_parts = ["Input Grid Features (from Perception Module):"]
-        if grid_features:
-            features_str_parts.append(f"  - Dimensions: {grid_features.grid_height}x{grid_features.grid_width}")
-            features_str_parts.append(f"  - Background Color: {grid_features.background_color}")
-            features_str_parts.append(f"  - Unique Colors: {sorted(list(grid_features.unique_colors))}")
-            features_str_parts.append(f"  - Number of Objects: {len(grid_features.objects)}")
-            for i, obj in enumerate(grid_features.objects[:3]): # Show details for first 3 objects
-                features_str_parts.append(f"    Object {i+1}: Color={obj.color}, Size={obj.pixel_count}, Centroid=({obj.centroid[0]:.1f},{obj.centroid[1]:.1f}), BBox={obj.bounding_box}")
-            if len(grid_features.objects) > 3:
-                features_str_parts.append(f"    ... and {len(grid_features.objects) - 3} more objects.")
-        else:
-            features_str_parts.append("  - Could not extract features.")
+        # 2. Process Input Grid (Perception, KB Population, Symbol Grounding)
+        input_grid_features: Optional[GridFeatures] = self.feature_extractor.extract_features(task.data)
         
-        features_prompt_segment = "\n".join(features_str_parts)
+        if input_grid_features:
+            self._populate_kb_from_gridfeatures(input_grid_features, "input", current_task_id, current_example_id)
+            grounded_input_symbols = self.symbol_grounder.get_grounded_symbols(input_grid_features)
+            self._store_grounded_symbols_in_kb(grounded_input_symbols, input_context, current_task_id, current_example_id, "input")
+        
+        # 3. If it's a training example, process output, analyze transformations, and induce rules
+        is_training_example = task.expected_output_grid is not None
+        transformation_analysis_results = None
+        
+        if is_training_example and input_grid_features and task.expected_output_grid:
+            output_grid_features = self.feature_extractor.extract_features(task.expected_output_grid)
+            if output_grid_features:
+                self._populate_kb_from_gridfeatures(output_grid_features, "output", current_task_id, current_example_id)
+                # Optional: ground symbols for output grid too if useful for analysis
+                # grounded_output_symbols = self.symbol_grounder.get_grounded_symbols(output_grid_features)
+                # self._store_grounded_symbols_in_kb(grounded_output_symbols, output_context, ...)
 
-        task_text_description_segment = ""
-        if task.text_description:
-            task_text_description_segment = f"\nTask Textual Description (from source):\n{task.text_description}\n"
+                transformation_analysis_results = self.feature_extractor.analyze_object_transformations(
+                    input_grid_features, output_grid_features
+                )
+                self._store_transformation_analysis_in_kb(
+                    transformation_analysis_results, current_task_id, current_example_id
+                )
+                
+                adapted_transformation_results = self._adapt_transformation_results_for_induction(
+                    transformation_analysis_results, current_task_id, current_example_id
+                )
+                # Induced rules are added to KB by the inducer
+                self.rule_inducer.induce_rules_from_task_example(
+                    self.kb, current_task_id, current_example_id, adapted_transformation_results
+                )
+        
+        # 4. Construct Enhanced Prompt for LLM
+        features_prompt_segment = self._format_grid_features_for_prompt(input_grid_features, "Input")
+        symbolic_info_segment = self._format_symbolic_info_for_prompt(input_context)
+        grounded_symbols_segment = self._format_grounded_symbols_for_prompt(input_context) # Uses input_context
+        
+        # Retrieve rules relevant to the current task (induced from its training examples)
+        # Rules induced from a specific example like "train_0" are tagged [task_id, "train_0", "induced", rule_type]
+        # We want rules from any training example of this task: [task_id, "induced"]
+        # This requires rule inducer to tag rules also with a general task tag for induced rules.
+        # For now, let's assume inducer tags rules with [task_id, example_id, "induced", type]
+        # and we can query for [task_id, "induced"] if we want all rules for the task.
+        # Let's refine this: rules for a task are tagged [task_id, "induced_rule"]
+        # SimpleRuleInducer needs to be updated to add this general task tag as well.
+        # For now, query based on [current_task_id] and filter by "induced" in description or a specific tag.
+        # Let's assume SimpleRuleInducer adds a general tag like [task_id, "induced_rule_pool"]
+        induced_rules_for_task = self.kb.get_rules(context_tags=[current_task_id, "induced_rule_pool"]) # Conceptual tag
+        rules_segment = self._format_induced_rules_for_prompt(induced_rules_for_task)
+
+        task_text_description_segment = f"\nTask Textual Description (from source):\n{task.text_description}\n" if task.text_description else ""
         
         # DSL Explanation for the prompt
         dsl_explanation = ( 
@@ -323,10 +351,12 @@ class ARCSolver(BaseSolver):
             f"{task_text_description_segment}\n"
             f"Input Grid (raw, list of lists of integers):\n{input_grid_str}\n\n"
             f"{features_prompt_segment}\n\n"
-            f"Symbolic Information (from Knowledge Base):\n{symbolic_info_segment}\n\n"
-            f"Think step-by-step to solve this puzzle. Explain your reasoning before providing the final grid. "
-            f"Consider the properties of objects, their relationships, and any transformations that might map the input to a plausible output.\n"
-            f"If symbolic information about objects and relationships is provided, use it to guide your reasoning.\n\n"
+            f"{symbolic_info_segment}\n\n"
+            f"{grounded_symbols_segment}\n\n"
+            f"{rules_segment}\n\n"
+            f"Think step-by-step to solve this puzzle. Explain your reasoning. "
+            f"Use all available information: raw grid, extracted features, symbolic properties & relationships, grounded predicates, and any induced rules.\n"
+            f"If relevant rules are provided, consider how they might apply here.\n\n"
             f"Available DSL for transformations:\n{dsl_explanation}\n\n"
             f"Your thought process should be clearly articulated. "
             f"Then, provide a DSL program if you can formulate one. "

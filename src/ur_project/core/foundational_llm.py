@@ -274,92 +274,94 @@ class HuggingFaceLLM(BaseLLM):
 
     def get_action_log_probs_and_train_step(
         self,
-        prompt_text: str,
-        generated_text: str,
-        reward: float,
-        learning_rate: float = 1e-5 # Default learning rate, could also use a class default
+        sequence_log_probs: torch.Tensor, # Log probabilities of the generated sequences
+        rewards: torch.Tensor,             # Scalar rewards for each sequence
+        learning_rate: Optional[float] = None # Optional learning rate override
     ) -> Dict[str, Any]:
-        if not self.model or not self.tokenizer:
-            # Optimizer is not checked here as it might be None for FSDP
+        """
+        Performs one step of policy gradient update.
+        Calculates loss using sequence_log_probs and rewards, performs backward pass,
+        and optimizer step if an internal optimizer exists.
+
+        Args:
+            sequence_log_probs (torch.Tensor): Log probabilities of the generated sequences.
+                                                Shape: (batch_size,) or (batch_size, 1)
+            rewards (torch.Tensor): Rewards for each sequence.
+                                    Shape: (batch_size,) or (batch_size, 1)
+            learning_rate (Optional[float]): If provided, overrides the default learning rate
+                                             for the optimizer for this step.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing computed loss and mean reward.
+                           Example: {"loss": computed_loss_value, "mean_reward": mean_reward_value}
+        """
+        if not self.model:
             raise RuntimeError(
-                "Model or tokenizer not initialized. "
-                "Cannot perform RL update step."
+                "Model not initialized. Cannot perform RL update step."
             )
 
-        if self.optimizer is None:
-            # This path is taken if FSDP is used and optimizer is managed externally.
-            # The external FSDP training loop would handle model.train/eval, optimizer steps.
-            # This method might still be called to compute log_probs or gradients
-            # if the external loop doesn't handle the forward/backward pass itself.
-            # For this placeholder, we assume if optimizer is None, the full update is external.
-            print(f"RL update called for HuggingFaceLLM. Reward: {reward}, LR: {learning_rate}. Optimizer is None (expected for FSDP or external management). Forward/backward pass and optimizer step assumed to be handled externally.")
-            # Placeholder for log_prob calculation even if optimizer step is external
-            # (Actual calculation is still commented out below for the placeholder)
-            # log_probs_value = 0.0 
-            # loss_value = -log_probs_value * reward 
-            return {"loss": 0.0, "log_probs": 0.0, "message": "Optimizer externally managed. Forward/backward/step handled outside."}
+        # Ensure sequence_log_probs and rewards are on the same device
+        # and have compatible shapes.
+        if sequence_log_probs.device != rewards.device:
+            rewards = rewards.to(sequence_log_probs.device)
 
-        # This path is taken if self.optimizer is initialized (e.g., non-FSDP usage)
-        print(f"RL update called for HuggingFaceLLM. Reward: {reward}, LR: {learning_rate}. Optimizer found. Placeholder for PyTorch backprop.")
-
-        # TODO: Implement actual PyTorch logic for RL update
-        #
-        # If self.optimizer is not None, this method is responsible for the full update.
-        # 1. Switch to train mode
-        # self.model.train() 
-        #
-        # 2. Tokenization
-        #    Concatenate prompt and generated text. Handle attention masks carefully.
-        #    Example:
-        #    prompt_tokens = self.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=True).to(self.model.device)
-        #    generated_tokens = self.tokenizer(generated_text, return_tensors="pt", add_special_tokens=False).to(self.model.device) # No BOS/EOS if part of sequence
-        #    
-        #    combined_input_ids = torch.cat((prompt_tokens.input_ids, generated_tokens.input_ids), dim=1)
-        #    attention_mask = torch.cat((prompt_tokens.attention_mask, generated_tokens.attention_mask), dim=1)
-        #    # Labels for loss calculation: -100 for prompt tokens, actual token_ids for generated_text
-        #    labels = torch.cat((torch.full_like(prompt_tokens.input_ids, -100), generated_tokens.input_ids), dim=1)
-
-        # 3. Forward Pass (with gradients enabled)
-        # with torch.enable_grad():
-        #    outputs = self.model(input_ids=combined_input_ids, attention_mask=attention_mask, labels=labels)
-        #    logits = outputs.logits # Logits for the entire sequence
-        #
-        #    # Select logits corresponding to the generated_text part
-        #    # Shift logits and labels for Causal LM: logits[..., :-1, :], labels[..., 1:]
-        #    # Careful with slicing here to only get loss for generated tokens.
-        #    # logits_for_generated_text = logits[:, prompt_tokens.input_ids.shape[1]-1:-1, :] # Example slice
-        #    # target_ids_for_generated_text = generated_tokens.input_ids 
-        #
-        # 4. Calculate Log Probabilities
-        #    log_probs = 0.0
-        #    # Iterate over the generated tokens and sum their log probabilities
-        #    # from the corresponding logits
-        #    # Example using cross_entropy or nll_loss on selected logits:
-        #    # loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='none') # To get per-token loss
-        #    # per_token_loss = loss_fn(logits_for_generated_text.reshape(-1, logits_for_generated_text.size(-1)),
-        #    #                          target_ids_for_generated_text.reshape(-1))
-        #    # log_probs = -per_token_loss.sum() # Negative of sum of losses is sum of log_probs
-        #    # (This needs careful verification depending on how loss_fn is defined and used)
-        #
-        # 5. Compute Loss (REINFORCE)
-        #    # Ensure learning_rate is applied to optimizer if not set during init or needing change
-        #    # for param_group in self.optimizer.param_groups:
-        #    #    param_group['lr'] = learning_rate
-        #
-        #    computed_loss = -log_probs * reward
-        #
-        # 6. Optimizer Step
-        #    self.optimizer.zero_grad()
-        #    computed_loss.backward()
-        #    self.optimizer.step()
-        #
-        # 7. Switch back to eval mode
-        # self.model.eval() 
-        #
-        # return {"loss": computed_loss.item(), "log_probs": log_probs.item()} # Placeholder
+        # Ensure rewards is compatible for element-wise multiplication
+        if rewards.ndim == 1:
+            rewards = rewards.unsqueeze(1) # (batch_size,) -> (batch_size, 1)
         
-        # Placeholder return
-        return {"loss": 0.0, "log_probs": 0.0, "message": "Placeholder RL update with internal optimizer logic."}
+        if sequence_log_probs.ndim == 1:
+            sequence_log_probs = sequence_log_probs.unsqueeze(1) # (batch_size,) -> (batch_size, 1)
+
+        if sequence_log_probs.shape != rewards.shape:
+            raise ValueError(
+                f"Shape mismatch between sequence_log_probs ({sequence_log_probs.shape}) and "
+                f"rewards ({rewards.shape}) after adjustments. They must be compatible for multiplication."
+            )
+
+        # Loss Calculation: -SUM(log_probs * rewards)
+        # The sum is over the batch.
+        loss = -torch.sum(sequence_log_probs * rewards)
+        mean_reward = rewards.mean().item()
+
+        # Backpropagation
+        # For FSDP, loss.backward() correctly handles gradient synchronization across shards.
+        # The model should be in train mode for gradients to be computed.
+        # It's assumed the caller manages model.train() and model.eval() states.
+        if not self.model.training:
+            print("Warning: get_action_log_probs_and_train_step called while model is not in training mode. Gradients might not be computed.")
+        
+        loss.backward()
+
+        # Optimizer Step (if an internal optimizer is managed by this class)
+        if self.optimizer:
+            # Optionally update learning rate for this step
+            if learning_rate is not None:
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = learning_rate
+            
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            
+            # Optionally restore learning rate if it was changed for this step only
+            # This depends on desired behavior - whether LR override is sticky or per-step.
+            # For now, assume it's per-step and we don't need to restore original LR here,
+            # as the next call or external management would set it.
+            
+            print(f"RL update performed. Loss: {loss.item()}, Mean Reward: {mean_reward}, LR: {learning_rate if learning_rate is not None else 'default'}")
+            updated_by = "internal_optimizer"
+        else:
+            # If optimizer is None (e.g., FSDP with external optimizer management),
+            # gradients have been computed by loss.backward(). The external training
+            # loop is responsible for calling optimizer.step() and zero_grad().
+            print(f"RL gradients computed (loss.backward() called). Loss: {loss.item()}, Mean Reward: {mean_reward}. Optimizer step to be handled externally (FSDP).")
+            updated_by = "external_fsdp_or_manual"
+
+        rl_update_info = {
+            "loss": loss.item(),
+            "mean_reward": mean_reward,
+            "updated_by": updated_by
+        }
+        return rl_update_info
 
 # To use this later (after deciding on a model and installing transformers/torch):
 # from ur_project.core.foundational_llm import HuggingFaceLLM

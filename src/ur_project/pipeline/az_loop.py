@@ -17,12 +17,15 @@ from ur_project.core.reward_model import SimpleBinaryRewardModel, ARCRewardModel
 from ur_project.core.foundational_llm import BaseLLM, LLMResponse # For MockLLM
 
 # ARC specific components for example
-from ur_project.core.proposer import ARCTaskProposer # Updated to new LLM-based proposer
+from ur_project.core.proposer import ARCTaskProposer 
 from ur_project.core.solver import ARCSolver
 from ur_project.core.arc_verifier import ARCVerifier
-from ur_project.data_processing.arc_types import ARCGrid, ARCPixel, ARCTask, ARCPuzzle # Added ARCTask, ARCPuzzle
-from ur_project.core.perception import BasicARCFeatureExtractor # For ARCSolver
-from ur_project.core.knowledge_base import ARCKnowledgeBase # For ARCSolver
+from ur_project.data_processing.arc_types import ARCGrid, ARCPixel, ARCTask, ARCPuzzle 
+# Updated perception, KB, and new Phase 3 components
+from ur_project.core.perception import UNetARCFeatureExtractor 
+from ur_project.core.knowledge_base import ARCKnowledgeBase 
+from ur_project.core.symbol_grounding import SymbolGroundingModel
+from ur_project.core.symbolic_learner import SimpleRuleInducer
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -396,23 +399,30 @@ if __name__ == "__main__":
         # For this example, always use MockLLMForLoop for ARC
         mock_arc_solver_llm = MockLLMForLoop(model_path_or_name="mock_llm_for_arc_solver")
         
-        # ARCSolver needs a feature extractor and knowledge base
-        feature_extractor_impl = BasicARCFeatureExtractor()
-        kb_impl = ARCKnowledgeBase() # Instantiate KnowledgeBase
+        # Instantiate new Phase 3 components
+        # UNetARCFeatureExtractor can be configured (e.g. model_path, use_unet_preprocessing)
+        # For this example, use_unet_preprocessing=False means it acts like BasicARCFeatureExtractor but includes advanced algorithmic features.
+        feature_extractor_impl = UNetARCFeatureExtractor(use_unet_preprocessing=False) 
+        symbol_grounder_impl = SymbolGroundingModel()
+        rule_inducer_impl = SimpleRuleInducer()
+        # ARCKnowledgeBase is instantiated inside ARCSolver, so not needed here.
         
-        # Use ARCTaskProposer for ARC mode
-        # ARCTaskProposer also needs an LLM. We can use a separate mock or the same one.
+        # ARCTaskProposer needs an LLM.
         mock_arc_task_proposer_llm = MockLLMForLoop(model_path_or_name="mock_llm_for_arc_task_proposer")
-        proposer_impl = ARCTaskProposer(llm=mock_arc_task_proposer_llm) # Use ARCTaskProposer
+        proposer_impl = ARCTaskProposer(llm=mock_arc_task_proposer_llm)
         
-        # ARCSolver now needs perception_engine and knowledge_base
-        solver_impl = ARCSolver(llm=mock_arc_solver_llm, perception_engine=feature_extractor_impl, knowledge_base=kb_impl)
+        # Update ARCSolver instantiation
+        solver_impl = ARCSolver(
+            llm=mock_arc_solver_llm, 
+            feature_extractor=feature_extractor_impl,
+            symbol_grounder=symbol_grounder_impl,
+            rule_inducer=rule_inducer_impl
+        )
         verifier_impl = ARCVerifier()
-        # Instantiate SimpleArcRLRewardModel for ARC mode
-        from ur_project.core.reward_model import SimpleArcRLRewardModel # Import the new model
+        
+        from ur_project.core.reward_model import SimpleArcRLRewardModel 
         reward_model_impl = SimpleArcRLRewardModel() 
         
-        # Evaluator for ARC (optional, can use the same mock or a specialized one)
         mock_arc_evaluator_llm = MockLLMForLoop(model_path_or_name="mock_llm_for_arc_evaluator")
         evaluator_impl = LLMQualitativeEvaluator(llm=mock_arc_evaluator_llm)
 
