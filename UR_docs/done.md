@@ -72,7 +72,7 @@ This document tracks the completion status of tasks outlined in `plan.md`.
 *   ARC dataset can be loaded, parsed, and visualized. - DONE (`arc_loader.py`, `arc_types.py`, `visualization.py` implemented and `notebooks/01_arc_data_exploration.py` updated)
 *   `plan.md` and basic project tracking are in place. - DONE (`plan.md` exists; this `done.md` serves as basic tracking)
 
-## Phase 2: Core UR Module Implementation & Enhanced AZ Loop - NOT DONE
+## Phase 2: Core UR Module Implementation & Enhanced AZ Loop - Partially DONE
 
 *   **2.1. Perception & Grounding Module (Version 1)** - DONE
     *   **2.1.1. ARC Grid Feature Extraction:** - DONE
@@ -98,27 +98,32 @@ This document tracks the completion status of tasks outlined in `plan.md`.
         *   **Objective:** Implement a few fundamental deductive rules (e.g., if object A is left of B, and B is left of C, then A is left of C). - DONE (Placeholder - `infer_spatial_relationships` added to `ARCKnowledgeBase` for transitivity)
         *   **Implementation:** Hand-craft initial rules relevant to ARC's spatial reasoning. - DONE (Transitivity for `is_left_of` is a hand-crafted rule example)
     *   **2.2.3. Integration with Perception Module:** - DONE (ARCKnowledgeBase contains methods like `add_arc_object_as_entity` and `add_grid_features_as_entity` to ingest perception output.)
-*   **2.3. Emergent Reasoning Core (Version 1 - LLM-centric)** - NOT DONE
-    *   **2.3.1. Advanced Prompting for ARC:** - Partially DONE (ARCSolver prompt updated for CoT and to expect THOUGHTS/OUTPUT_GRID format. ARCSolver now initializes and populates a KB, and includes a placeholder for symbolic info from KB in prompt. Actual KB querying and sophisticated formatting for prompt TBD. Few-shot prompting TBD.)
-        *   **Objective:** Develop more sophisticated prompting strategies for the foundational LLM to solve ARC tasks, incorporating outputs from the Perception module. - Partially DONE (CoT encouraged, basic KB population from perception started)
-        *   **Implementation:** Design prompts that include symbolic representations of the grid, task descriptions, and Chain-of-Thought (CoT) encouragement. - Partially DONE (CoT encouraged in ARCSolver, initial symbolic info placeholder from KB added to prompt)
-        *   Experiment with few-shot prompting using successful examples from the AZ loop or public ARC training set. - NOT DONE
+*   **2.3. Emergent Reasoning Core (Version 1 - LLM-centric)** - DONE
+    *   **2.3.1. Advanced Prompting for ARC:** - DONE
+        *   **Objective:** Develop more sophisticated prompting strategies for the foundational LLM to solve ARC tasks, incorporating outputs from the Perception module. - DONE
+        *   **Implementation:** Design prompts that include symbolic representations of the grid, task descriptions, and Chain-of-Thought (CoT) encouragement. - DONE
+        *   Experiment with few-shot prompting using successful examples from the AZ loop or public ARC training set. - DONE
     *   **2.3.2. Hypothesis Generation:** - DONE (ARCSolver prompt updated to request hypotheses. Parsing logic added. Solution object updated to store hypotheses.)
         *   Task the LLM to generate potential transformations or rules that might solve an ARC task, even if it can't fully solve it. - DONE
 *   **2.4. Program Synthesis & Reflection Engine (Version 1 - Basic)** - NOT DONE
     *   **2.4.1. Domain Specific Language (DSL) for ARC (Version 1):** - DONE (Initial DSL classes for operations, selectors, positions, and programs defined in `arc_dsl.py`.)
         *   **Objective:** Define a very simple DSL for grid transformations (e.g., `MOVE(object, direction)`, `CHANGE_COLOR(object, new_color)`, `COPY_SHAPE(source_pos, target_pos)`). - DONE
         *   **Implementation:** Design the syntax and semantics of these basic operations. - DONE (Dataclasses define syntax; semantics to be enforced by executor)
-    *   **2.4.2. LLM-to-DSL Translation (Initial Attempt):** - DONE (ARCSolver prompt updated for DSL generation. Solution object updated to store raw DSL string. max_new_tokens increased.)
+    *   **2.4.2. LLM-to-DSL Translation (Initial Attempt):** - DONE (ARCSolver prompt updated for DSL generation. Solution object updated to store raw DSL string. max_new_tokens increased.) (Enhanced with retry mechanism and improved parsing)
         *   **Objective:** Train/prompt the foundational LLM to translate its high-level solution hypotheses (from 2.3.2) into sequences of DSL commands.
     *   **2.4.3. DSL Executor/Interpreter:** - DONE (Initial `ARCDSLInterpreter` created in `arc_dsl_interpreter.py` with `FillRectangleOp` and `ChangeColorOp` implemented. Placeholder for other ops.)
-    *   **2.4.4. Verifiable Execution (Feedback to Solver):** - DONE (ARCSolver now parses raw_dsl_program into DSLProgram, executes it using ARCDSLInterpreter, and updates Solution.parsed_answer with the executed grid if successful. Metadata on DSL execution status is recorded.)
-*   **2.5. Enhanced Absolute Zero Loop** - NOT DONE
-    *   **2.5.1. ARC-focused Task Proposer (via Emergent Reasoning Core):** - NOT DONE
-    *   **2.5.2. Solver = Emergent Reasoning Core V1 + Program Synthesis V1:** - NOT DONE
-    *   **2.5.3. Verifier = DSL Executor + ARC Ground Truth:** - DONE (ARCVerifier confirmed to use Solution.parsed_answer, which is updated by ARCSolver with DSL-executed grid. ARCVerifier enhanced to log DSL execution metadata.)
+    *   **2.4.4. Verifiable Execution (Feedback to Solver):** - DONE (ARCSolver now parses raw_dsl_program into DSLProgram, executes it using ARCDSLInterpreter, and updates Solution.parsed_answer with the executed grid if successful. Metadata on DSL execution status is recorded.) (Enhanced with more detailed Solution object and verifier linkage confirmed)
+*   **2.5. Enhanced Absolute Zero Loop** - Partially DONE
+    *   **2.5.1. ARC-focused Task Proposer (via Emergent Reasoning Core):** - DONE
+        *   **Objective:** Use the LLM (Emergent Reasoning Core V1) to propose variations or simplifications of existing ARC tasks, or generate new tasks based on learned patterns. - DONE
+        *   **Implementation:** Prompt the LLM with examples of ARC tasks and ask it to "create a similar but new puzzle." This will be noisy initially. - DONE
+    *   **2.5.2. Solver = Emergent Reasoning Core V1 + Program Synthesis V1:** - Partially DONE (ARCSolver now integrates DSL parsing and execution pipeline)
+    *   **2.5.3. Verifier = DSL Executor + ARC Ground Truth:** - DONE (ARCVerifier confirmed to use Solution.parsed_answer, which is updated by ARCSolver with DSL-executed grid. ARCVerifier enhanced to log DSL execution metadata.) (Enhanced with detailed DSL execution logging and metadata in VerificationResult)
     *   **2.5.4. Gemma 3 for Basic Evaluation (Initial Integration):** - DONE (Adapted to use user-specified Gemma 3 27b int4 model via `LLMQualitativeEvaluator` in `AZLoop`)
-    *   **2.5.5. Refined Reward Model & Basic RL:** - NOT DONE
+    *   **2.5.5. Refined Reward Model & Basic RL:** - Partially DONE
+        *   **Objective:** Use the Verifier's feedback to create a simple reward signal. - DONE (SimpleArcRLRewardModel created and integrated)
+        *   **Implementation:** Implement a basic reward model that assigns positive rewards for correct solutions and negative for incorrect ones. This will initially be used to track performance and guide manual iteration on prompts/Proposer, rather than full RL training of the LLM itself in this early stage. - DONE (SimpleArcRLRewardModel created and integrated)
+        *   **Implementation:** Experiment with simple RL techniques (e.g., policy gradient like REINFORCE) to fine-tune the LLM in the Emergent Reasoning Core to generate better solution hypotheses or more accurate DSL translations. This is highly experimental at this stage. - NOT DONE
 *   **2.6. Distributed Training & Inference Setup (4x L4s)** - NOT DONE
     *   **2.6.1. Model Parallelism / Data Parallelism Strategy:** - NOT DONE
     *   **2.6.2. Initial Implementation:** - NOT DONE
@@ -134,4 +139,4 @@ This document tracks the completion status of tasks outlined in `plan.md`.
 
 ## Phase 5: Towards "Infinite Complexity," Generalization, Kaggle & Ethical AGI - NOT DONE
 *   (All sub-items under Phase 5 are NOT DONE)
-**Success Criteria for Phase 5 (and the Project as a Whole):** - NOT DONE (All sub-items implicitly NOT DONE) 
+**Success Criteria for Phase 5 (and the Project as a Whole):** - NOT DONE (All sub-items implicitly NOT DONE)
