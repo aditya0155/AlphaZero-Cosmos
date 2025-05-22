@@ -165,7 +165,7 @@ class ARCTaskProposer(BaseProposer):
             
         return prompt_examples_str
 
-    def _parse_llm_response_to_arctask(self, response_text: str, task_id: str) -> ARCTask:
+    def _parse_llm_response_to_arctask(self, response_text: str, task_id: str) -> tuple[ARCTask, str, str]:
         response_text = response_text.strip()
 
         def extract_section(key: str, text: str) -> str:
@@ -321,12 +321,12 @@ class ARCTaskProposer(BaseProposer):
             # For now, let's stick to the spec of returning ARCTask.
             # The metadata will be effectively discarded by the current ARCTask definition.
             # I will add a comment.
-        )
+        ), task_name_str, task_description_str
         # If ARCTask had a metadata field:
         # return ARCTask(..., metadata=task_metadata)
 
 
-    def propose_task(self, task_id: str, concept: Optional[str] = None) -> ARCTask:
+    def propose_task(self, task_id: str, concept: Optional[str] = None) -> tuple[ARCTask, str, str]:
         few_shot_examples_str = self._load_few_shot_task_examples_for_prompt()
         
         prompt_instruction = "Please generate a new ARC task."
@@ -372,14 +372,14 @@ The input and output grids in a pair should usually have the same dimensions, bu
         # print(f"DEBUG: ARCTaskProposer Raw LLM Response:\n{response_text}") # For debugging
 
         try:
-            generated_task = self._parse_llm_response_to_arctask(response_text, task_id)
+            generated_task, task_name, task_description = self._parse_llm_response_to_arctask(response_text, task_id)
             # If ARCTask is updated to include metadata:
             # parsed_metadata = {
-            #     "task_name": generated_task.metadata.get("task_name"), # Assuming it's structured like this
-            #     "task_description": generated_task.metadata.get("task_description")
+            #     "task_name": task_name,
+            #     "task_description": task_description
             # }
             # generated_task.metadata = parsed_metadata # Or however it's meant to be stored
-            return generated_task
+            return generated_task, task_name, task_description
         except TaskParsingError as e:
             # print(f"Error parsing LLM response for task proposal: {e}")
             # Fallback: return a dummy/error task or re-raise
